@@ -1,0 +1,62 @@
+[
+  {
+    "id": "b09a7903-3eed-4faa-ae50-93c23e90973f",
+    "clientId": "cb3cc4df-8f5f-4a4a-a83f-d2bfba18fcbe",
+    "metal": "SILVER",
+    "type": "SELL",
+    "quantity": 20000,
+    "rate": 0.012,
+    "amount": 240,
+    "date": "2026-07-07",
+    "time": "15:00",
+    "remarks": "",
+    "createdBy": "Admin",
+    "createdAt": "2026-07-07T09:30:53.490Z",
+    "updatedAt": "2026-07-07T09:30:53.490Z"
+  },
+  {
+    "id": "448678f8-5a7b-4fe3-b2a6-547b4107acb3",
+    "clientId": "cb3cc4df-8f5f-4a4a-a83f-d2bfba18fcbe",
+    "metal": "SILVER",
+    "type": "BUY",
+    "quantity": 10000,
+    "rate": 0.01,
+    "amount": 100,
+    "date": "2026-07-07",
+    "time": "15:05",
+    "remarks": "",
+    "createdBy": "Admin",
+    "createdAt": "2026-07-07T09:35:03.136Z",
+    "updatedAt": "2026-07-07T09:35:03.136Z"
+  },
+  {
+    "id": "68a74936-1572-4443-9ca3-a1e24c285dab",
+    "clientId": "488f094f-8c97-43f0-9c58-99cbfdb51ac1",
+    "metal": "GOLD",
+    "type": "BUY",
+    "quantity": 100,
+    "rate": 13500,
+    "amount": 1350000,
+    "date": "2026-07-07",
+    "time": "15:08",
+    "remarks": "",
+    "createdBy": "Admin",
+    "createdAt": "2026-07-07T09:39:07.272Z",
+    "updatedAt": "2026-07-07T09:39:56.319Z"
+  },
+  {
+    "id": "a8db40f0-42fa-408f-8c6c-c307e3658ad6",
+    "clientId": "cb3cc4df-8f5f-4a4a-a83f-d2bfba18fcbe",
+    "metal": "GOLD",
+    "type": "SELL",
+    "quantity": 100,
+    "rate": 14000,
+    "amount": 1400000,
+    "date": "2026-07-07",
+    "time": "15:09",
+    "remarks": "",
+    "createdBy": "Admin",
+    "createdAt": "2026-07-07T09:41:45.669Z",
+    "updatedAt": "2026-07-07T09:41:45.669Z"
+  }
+]
