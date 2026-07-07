@@ -3,11 +3,15 @@
  * has realistic data to explore on first run. Run with `npm run seed`.
  * Safe to re-run: it overwrites existing data files.
  */
+import dotenv from 'dotenv';
+dotenv.config();
+
 import { v4 as uuid } from 'uuid';
 import { clientsStore, ledgerStore, paymentsStore, transactionsStore } from '../database/repositories';
 import { Client, Transaction, Settlement } from '../types';
 import { rebuildAllLedgers } from '../services/ledger.service';
 import { cacheStatistics } from '../services/stats.service';
+import { connectToDatabase, closeDatabaseConnection } from './mongoClient';
 
 function isoDaysAgo(days: number): string {
   const d = new Date();
@@ -16,6 +20,8 @@ function isoDaysAgo(days: number): string {
 }
 
 async function seed(): Promise<void> {
+  await connectToDatabase();
+
   const now = new Date().toISOString();
 
   const clients: Client[] = [
@@ -104,11 +110,14 @@ async function seed(): Promise<void> {
   console.log(`  Transactions: ${transactions.length}`);
   // eslint-disable-next-line no-console
   console.log(`  Settlements: ${settlements.length}`);
+
+  await closeDatabaseConnection();
 }
 
 seed()
   .then(() => process.exit(0))
-  .catch((err) => {
+  .catch(async (err) => {
+    await closeDatabaseConnection();
     // eslint-disable-next-line no-console
     console.error('Seeding failed:', err);
     process.exit(1);

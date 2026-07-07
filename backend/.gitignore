@@ -3,5 +3,4 @@ dist/
 *.log
 .env
 .env.local
-database/*.lock
 backups/

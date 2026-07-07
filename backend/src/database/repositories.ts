@@ -1,9 +1,9 @@
 /**
- * Central place where every JSON-backed collection is instantiated.
- * Import repositories from here rather than constructing JsonStore directly,
- * so there is exactly one instance (and one write-queue) per file.
+ * Central place where every MongoDB-backed collection is instantiated.
+ * Import repositories from here rather than constructing MongoStore directly,
+ * so there is exactly one instance (and one write-queue) per collection.
  */
-import { JsonStore } from '../utils/jsonStore';
+import { MongoStore } from '../utils/mongoStore';
 import { Client, Transaction, Settlement, LedgerEntry, Settings } from '../types';
 
 export interface StatisticsCache {
@@ -15,11 +15,11 @@ export interface StatisticsCache {
   silverQuantity: number;
 }
 
-export const clientsStore = new JsonStore<Client[]>('clients.json', []);
-export const transactionsStore = new JsonStore<Transaction[]>('transactions.json', []);
-export const paymentsStore = new JsonStore<Settlement[]>('payments.json', []);
-export const ledgerStore = new JsonStore<LedgerEntry[]>('ledger.json', []);
-export const statisticsStore = new JsonStore<StatisticsCache>('statistics.json', {
+export const clientsStore = new MongoStore<Client[]>('clients', []);
+export const transactionsStore = new MongoStore<Transaction[]>('transactions', []);
+export const paymentsStore = new MongoStore<Settlement[]>('payments', []);
+export const ledgerStore = new MongoStore<LedgerEntry[]>('ledger', []);
+export const statisticsStore = new MongoStore<StatisticsCache>('statistics', {
   generatedAt: new Date().toISOString(),
   totalProfit: 0,
   outstandingReceivable: 0,
@@ -27,7 +27,7 @@ export const statisticsStore = new JsonStore<StatisticsCache>('statistics.json',
   goldQuantity: 0,
   silverQuantity: 0,
 });
-export const settingsStore = new JsonStore<Settings>('settings.json', {
+export const settingsStore = new MongoStore<Settings>('settings', {
   businessName: 'Hasti Jewellers',
   ownerName: 'Owner',
   currency: 'INR',
