@@ -7,7 +7,7 @@ import { rebuildClientLedger } from './ledger.service';
 import { cacheStatistics } from './stats.service';
 
 /** In-memory, process-local buffer of recently deleted transactions to support "Undo Delete". */
-const recentlyDeleted: Array<{ transaction: Transaction; deletedAt: number }> = [];
+const recentlyDeleted: Array<{ userId: string; transaction: Transaction; deletedAt: number }> = [];
 const UNDO_WINDOW_MS = 30_000;
 
 function pruneUndoBuffer(): void {
@@ -17,20 +17,21 @@ function pruneUndoBuffer(): void {
   }
 }
 
-export async function listTransactions(): Promise<Transaction[]> {
-  return transactionsStore.read();
+export async function listTransactions(userId: string): Promise<Transaction[]> {
+  const all = await transactionsStore.read();
+  return all.filter((t) => t.userId === userId);
 }
 
-export async function getTransactionById(id: string): Promise<Transaction> {
+export async function getTransactionById(userId: string, id: string): Promise<Transaction> {
   const transactions = await transactionsStore.read();
-  const txn = transactions.find((t) => t.id === id);
+  const txn = transactions.find((t) => t.id === id && t.userId === userId);
   if (!txn) throw AppError.notFound('Transaction');
   return txn;
 }
 
-async function assertClientExists(clientId: string): Promise<void> {
+async function assertClientExists(userId: string, clientId: string): Promise<void> {
   const clients = await clientsStore.read();
-  if (!clients.some((c) => c.id === clientId)) {
+  if (!clients.some((c) => c.id === clientId && c.userId === userId)) {
     throw new AppError('Client does not exist', 422, 'INVALID_CLIENT');
   }
 }
@@ -39,11 +40,12 @@ function computeAmount(quantity: number, rate: number): number {
   return Math.round(quantity * rate * 100) / 100;
 }
 
-export async function createTransaction(input: TransactionInput): Promise<Transaction> {
-  await assertClientExists(input.clientId);
+export async function createTransaction(userId: string, input: TransactionInput): Promise<Transaction> {
+  await assertClientExists(userId, input.clientId);
   const now = new Date().toISOString();
   const transaction: Transaction = {
     id: uuid(),
+    userId,
     clientId: input.clientId,
     metal: input.metal,
     type: input.type,
@@ -58,21 +60,21 @@ export async function createTransaction(input: TransactionInput): Promise<Transa
     updatedAt: now,
   };
 
-  await transactionsStore.update((current) => {
-    if (current.some((t) => t.id === transaction.id)) {
-      throw AppError.conflict('Duplicate transaction ID generated, please retry');
-    }
-    return [...current, transaction];
-  });
+  const after = await transactionsStore.update((current) =>
+    current.some((t) => t.id === transaction.id) ? current : [...current, transaction]
+  );
+  if (!after.some((t) => t.id === transaction.id)) {
+    throw AppError.conflict('Duplicate transaction ID generated, please retry');
+  }
 
-  await rebuildClientLedger(transaction.clientId);
-  await cacheStatistics();
+  await rebuildClientLedger(userId, transaction.clientId);
+  await cacheStatistics(userId);
   return transaction;
 }
 
-export async function duplicateTransaction(id: string): Promise<Transaction> {
-  const original = await getTransactionById(id);
-  return createTransaction({
+export async function duplicateTransaction(userId: string, id: string): Promise<Transaction> {
+  const original = await getTransactionById(userId, id);
+  return createTransaction(userId, {
     clientId: original.clientId,
     metal: original.metal,
     type: original.type,
@@ -85,15 +87,19 @@ export async function duplicateTransaction(id: string): Promise<Transaction> {
   });
 }
 
-export async function updateTransaction(id: string, input: TransactionUpdateInput): Promise<Transaction> {
-  if (input.clientId) await assertClientExists(input.clientId);
+export async function updateTransaction(
+  userId: string,
+  id: string,
+  input: TransactionUpdateInput
+): Promise<Transaction> {
+  if (input.clientId) await assertClientExists(userId, input.clientId);
 
   let updated: Transaction | undefined;
   let affectedClientIds: string[] = [];
 
   await transactionsStore.update((current) => {
-    const index = current.findIndex((t) => t.id === id);
-    if (index === -1) throw AppError.notFound('Transaction');
+    const index = current.findIndex((t) => t.id === id && t.userId === userId);
+    if (index === -1) return current;
     const existing = current[index];
     const quantity = input.quantity ?? existing.quantity;
     const rate = input.rate ?? existing.rate;
@@ -104,6 +110,7 @@ export async function updateTransaction(id: string, input: TransactionUpdateInpu
       rate,
       amount: computeAmount(quantity, rate),
       id: existing.id,
+      userId: existing.userId,
       createdAt: existing.createdAt,
       updatedAt: new Date().toISOString(),
     };
@@ -115,31 +122,31 @@ export async function updateTransaction(id: string, input: TransactionUpdateInpu
 
   if (!updated) throw AppError.notFound('Transaction');
   for (const clientId of affectedClientIds) {
-    await rebuildClientLedger(clientId);
+    await rebuildClientLedger(userId, clientId);
   }
-  await cacheStatistics();
+  await cacheStatistics(userId);
   return updated;
 }
 
-export async function deleteTransaction(id: string): Promise<void> {
+export async function deleteTransaction(userId: string, id: string): Promise<void> {
   let removed: Transaction | undefined;
   await transactionsStore.update((current) => {
-    const index = current.findIndex((t) => t.id === id);
-    if (index === -1) throw AppError.notFound('Transaction');
+    const index = current.findIndex((t) => t.id === id && t.userId === userId);
+    if (index === -1) return current;
     removed = current[index];
     return current.filter((t) => t.id !== id);
   });
 
   if (!removed) throw AppError.notFound('Transaction');
   pruneUndoBuffer();
-  recentlyDeleted.push({ transaction: removed, deletedAt: Date.now() });
-  await rebuildClientLedger(removed.clientId);
-  await cacheStatistics();
+  recentlyDeleted.push({ userId, transaction: removed, deletedAt: Date.now() });
+  await rebuildClientLedger(userId, removed.clientId);
+  await cacheStatistics(userId);
 }
 
-export async function undoDeleteTransaction(id: string): Promise<Transaction> {
+export async function undoDeleteTransaction(userId: string, id: string): Promise<Transaction> {
   pruneUndoBuffer();
-  const index = recentlyDeleted.findIndex((entry) => entry.transaction.id === id);
+  const index = recentlyDeleted.findIndex((entry) => entry.userId === userId && entry.transaction.id === id);
   if (index === -1) {
     throw new AppError('Undo window expired or transaction not found', 410, 'UNDO_EXPIRED');
   }
@@ -147,8 +154,8 @@ export async function undoDeleteTransaction(id: string): Promise<Transaction> {
   recentlyDeleted.splice(index, 1);
 
   await transactionsStore.update((current) => [...current, transaction]);
-  await rebuildClientLedger(transaction.clientId);
-  await cacheStatistics();
+  await rebuildClientLedger(userId, transaction.clientId);
+  await cacheStatistics(userId);
   return transaction;
 }
 

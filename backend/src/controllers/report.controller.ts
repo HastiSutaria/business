@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ok } from '../utils/response';
 import { AppError } from '../utils/errors';
+import { getUserId } from '../utils/reqUser';
 import { transactionsStore, paymentsStore, clientsStore } from '../database/repositories';
 import {
   buildClientReport,
@@ -53,34 +54,51 @@ function rangeFromQuery(req: Request): { from?: string; to?: string } {
   };
 }
 
-export const getDashboard = asyncHandler(async (_req: Request, res: Response) => {
-  const stats = await computeDashboardStats();
+export const getDashboard = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
+  const stats = await computeDashboardStats(userId);
   ok(res, stats);
 });
 
 export const getProfitReport = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
   const range = rangeFromQuery(req);
-  const transactions = filterByDateRange(await transactionsStore.read(), range);
+  const allTransactions = await transactionsStore.read();
+  const transactions = filterByDateRange(
+    allTransactions.filter((t) => t.userId === userId),
+    range
+  );
   const report = buildProfitReport(transactions);
   ok(res, { range, ...report });
 });
 
 export const getMetalReport = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
   const range = rangeFromQuery(req);
-  const transactions = filterByDateRange(await transactionsStore.read(), range);
+  const allTransactions = await transactionsStore.read();
+  const transactions = filterByDateRange(
+    allTransactions.filter((t) => t.userId === userId),
+    range
+  );
   const gold = buildMetalReport(transactions, 'GOLD');
   const silver = buildMetalReport(transactions, 'SILVER');
   ok(res, { range, gold, silver });
 });
 
 export const getClientReport = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
   const clients = await clientsStore.read();
-  const client = clients.find((c) => c.id === req.params.id);
+  const client = clients.find((c) => c.id === req.params.id && c.userId === userId);
   if (!client) throw AppError.notFound('Client');
 
   const range = rangeFromQuery(req);
-  const transactions = filterByDateRange(await transactionsStore.read(), range);
-  const settlements = await paymentsStore.read();
-  const report = await buildClientReport(client.id, transactions, settlements);
+  const allTransactions = await transactionsStore.read();
+  const transactions = filterByDateRange(
+    allTransactions.filter((t) => t.userId === userId),
+    range
+  );
+  const allSettlements = await paymentsStore.read();
+  const settlements = allSettlements.filter((s) => s.userId === userId);
+  const report = await buildClientReport(userId, client.id, transactions, settlements);
   ok(res, { client, range, ...report });
 });
