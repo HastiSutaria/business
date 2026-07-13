@@ -1,12 +1,15 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LogOut, Moon, Search, Settings as SettingsIcon, Sun } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 export function TopBar(): JSX.Element {
   const navigate = useNavigate();
   const { resolvedTheme, toggleTheme } = useTheme();
   const { logout } = useAuth();
+  const [logoutOpen, setLogoutOpen] = useState(false);
 
   const handleLogout = (): void => {
     logout();
@@ -49,7 +52,7 @@ export function TopBar(): JSX.Element {
           <SettingsIcon size={20} />
         </button>
         <button
-          onClick={handleLogout}
+          onClick={() => setLogoutOpen(true)}
           className="rounded-full p-2.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition text-gray-500"
           aria-label="Log out"
           title="Log out"
@@ -57,6 +60,16 @@ export function TopBar(): JSX.Element {
           <LogOut size={20} />
         </button>
       </div>
+
+      <ConfirmDialog
+        open={logoutOpen}
+        title="Log Out"
+        message="Are you sure you want to log out?"
+        confirmLabel="Log Out"
+        danger
+        onCancel={() => setLogoutOpen(false)}
+        onConfirm={handleLogout}
+      />
     </header>
   );
 }
