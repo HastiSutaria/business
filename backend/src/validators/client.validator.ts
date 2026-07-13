@@ -2,11 +2,14 @@ import { z } from 'zod';
 
 export const clientSchema = z.object({
   clientName: z.string().trim().min(1, 'Client name is required').max(120),
-  businessName: z.string().trim().min(1, 'Business name is required').max(120),
+  businessName: z.string().trim().max(120).optional().default(''),
   mobile: z
     .string()
     .trim()
-    .regex(/^[0-9+\-\s]{7,15}$/, 'Enter a valid mobile number'),
+    .regex(/^[0-9+\-\s]{7,15}$/, 'Enter a valid mobile number')
+    .optional()
+    .or(z.literal(''))
+    .transform((v) => v ?? ''),
   address: z.string().trim().max(500).optional().default(''),
   gst: z
     .string()
