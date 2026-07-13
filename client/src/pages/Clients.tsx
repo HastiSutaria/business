@@ -112,9 +112,7 @@ export default function Clients(): JSX.Element {
                 </div>
                 <div className="min-w-0">
                   <p className="font-semibold truncate">{client.clientName}</p>
-                  <p className="text-xs text-gray-400 truncate">
-                    {client.businessName} &middot; {client.mobile}
-                  </p>
+                  <p className="text-xs text-gray-400 truncate">{client?.businessName || ''}</p>
                 </div>
               </Link>
               <div className="text-right shrink-0 hidden sm:block">
@@ -139,7 +137,10 @@ export default function Clients(): JSX.Element {
                 >
                   <Trash2 size={16} />
                 </button>
-                <Link to={`/clients/${client.id}`} className="rounded-full p-2 hover:bg-gray-100 dark:hover:bg-gray-800">
+                <Link
+                  to={`/clients/${client.id}`}
+                  className="rounded-full p-2 hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
                   <ChevronRight size={16} />
                 </Link>
               </div>
@@ -166,7 +167,9 @@ export default function Clients(): JSX.Element {
         onCancel={() => setDeletingClient(undefined)}
         onConfirm={() => {
           if (!deletingClient) return;
-          deleteMutation.mutate(deletingClient.id, { onSuccess: () => setDeletingClient(undefined) });
+          deleteMutation.mutate(deletingClient.id, {
+            onSuccess: () => setDeletingClient(undefined),
+          });
         }}
       />
     </div>

@@ -6,8 +6,12 @@ import { Client } from '@/types';
 
 const formSchema = z.object({
   clientName: z.string().min(1, 'Client name is required'),
-  businessName: z.string().min(1, 'Business name is required'),
-  mobile: z.string().regex(/^[0-9+\-\s]{7,15}$/, 'Enter a valid mobile number'),
+  businessName: z.string().default(''),
+  mobile: z
+    .string()
+    .regex(/^[0-9+\-\s]{7,15}$/, 'Enter a valid mobile number')
+    .or(z.literal(''))
+    .default(''),
   address: z.string().optional(),
   gst: z.string().optional(),
   openingBalance: z.coerce.number(),
