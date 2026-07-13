@@ -146,3 +146,9 @@ export interface BackupInfo {
   createdAt: string;
   sizeBytes?: number;
 }
+
+export interface LoginResponse {
+  token: string;
+  expiresAt: string;
+  loginId: string;
+}

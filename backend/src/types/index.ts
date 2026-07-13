@@ -84,3 +84,14 @@ export interface ApiError {
   code: string;
   details?: unknown;
 }
+
+/** The single system-generated admin account. There is no self-registration. */
+export interface AdminUser {
+  id: string;
+  loginId: string;
+  passwordHash: string;
+  failedAttempts: number;
+  lockedUntil?: string;
+  createdAt: string;
+  updatedAt: string;
+}

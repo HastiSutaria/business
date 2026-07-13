@@ -42,18 +42,22 @@ export default function ClientDetail(): JSX.Element {
         </button>
       </div>
 
-      <div className="card p-4 flex flex-col gap-2 text-sm">
-        <div className="flex items-center gap-2 text-gray-500">
-          <Phone size={14} /> {client.mobile}
+      {(client.mobile || client.address || client.gst || client.notes) && (
+        <div className="card p-4 flex flex-col gap-2 text-sm">
+          {client.mobile && (
+            <div className="flex items-center gap-2 text-gray-500">
+              <Phone size={14} /> {client.mobile}
+            </div>
+          )}
+          {client.address && (
+            <div className="flex items-center gap-2 text-gray-500">
+              <MapPin size={14} /> {client.address}
+            </div>
+          )}
+          {client.gst && <div className="text-gray-500">GST: {client.gst}</div>}
+          {client.notes && <div className="text-gray-500 italic">"{client.notes}"</div>}
         </div>
-        {client.address && (
-          <div className="flex items-center gap-2 text-gray-500">
-            <MapPin size={14} /> {client.address}
-          </div>
-        )}
-        {client.gst && <div className="text-gray-500">GST: {client.gst}</div>}
-        {client.notes && <div className="text-gray-500 italic">"{client.notes}"</div>}
-      </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard
@@ -74,7 +78,10 @@ export default function ClientDetail(): JSX.Element {
       <div className="card p-4">
         <h3 className="text-sm font-semibold mb-3">Client Ledger</h3>
         {ledger.length === 0 ? (
-          <EmptyState title="No ledger entries yet" description="Transactions and settlements will appear here." />
+          <EmptyState
+            title="No ledger entries yet"
+            description="Transactions and settlements will appear here."
+          />
         ) : (
           <div className="overflow-x-auto -mx-4 px-4">
             <table className="w-full text-sm min-w-[600px]">
@@ -90,7 +97,9 @@ export default function ClientDetail(): JSX.Element {
               <tbody className="divide-y divide-gray-50 dark:divide-gray-800/60">
                 {ledger.map((entry) => (
                   <tr key={entry.id}>
-                    <td className="py-2.5 pr-3 whitespace-nowrap text-gray-500">{formatDate(entry.date)}</td>
+                    <td className="py-2.5 pr-3 whitespace-nowrap text-gray-500">
+                      {formatDate(entry.date)}
+                    </td>
                     <td className="py-2.5 pr-3">{entry.description}</td>
                     <td className="py-2.5 pr-3 text-right text-profit">
                       {entry.credit > 0 ? formatCurrencyPrecise(entry.credit) : '-'}

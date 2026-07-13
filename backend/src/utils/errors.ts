@@ -22,4 +22,12 @@ export class AppError extends Error {
   static conflict(message: string): AppError {
     return new AppError(message, 409, 'CONFLICT');
   }
+
+  static unauthorized(message = 'Authentication required'): AppError {
+    return new AppError(message, 401, 'UNAUTHORIZED');
+  }
+
+  static locked(message: string): AppError {
+    return new AppError(message, 423, 'ACCOUNT_LOCKED');
+  }
 }

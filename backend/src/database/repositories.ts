@@ -4,7 +4,7 @@
  * so there is exactly one instance (and one write-queue) per collection.
  */
 import { MongoStore } from '../utils/mongoStore';
-import { Client, Transaction, Settlement, LedgerEntry, Settings } from '../types';
+import { AdminUser, Client, Transaction, Settlement, LedgerEntry, Settings } from '../types';
 
 export interface StatisticsCache {
   generatedAt: string;
@@ -35,3 +35,5 @@ export const settingsStore = new MongoStore<Settings>('settings', {
   goldUnit: 'gram',
   silverUnit: 'kg',
 });
+/** Exactly one admin account ever exists; it is provisioned by the create-admin script only. */
+export const adminUserStore = new MongoStore<AdminUser | null>('admin_user', null);
