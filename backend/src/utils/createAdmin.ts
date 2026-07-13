@@ -1,16 +1,16 @@
 /**
- * Provisions the single admin login ID + password. There is no sign-up flow —
- * this script is the only way an admin account is created.
- * Run again with --force to rotate credentials (invalidates the previous ones).
+ * Provisions logins. There is no sign-up flow — this script is the only way a
+ * login is ever created. Each login is a fully independent tenant: its own
+ * clients, transactions, settlements, settings, everything.
  *
- *   npm run create-admin                                     # random credentials, only if none exist
- *   npm run create-admin -- --force                          # regenerate random credentials
- *   npm run create-admin -- --login-id=user --password=test1234 --force   # fixed credentials (still hashed)
+ *   npm run create-admin                                     -> adds ONE new tenant with random credentials
+ *   npm run create-admin -- --login-id=acme --password=Test@1234           -> adds a tenant with fixed credentials (fails if taken)
+ *   npm run create-admin -- --login-id=acme --password=NewPass1! --force   -> rotates that tenant's password
  */
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { adminExists, provisionAdmin, provisionAdminWithCredentials } from '../services/auth.service';
+import { LoginIdTakenError, provisionAdminWithCredentials, provisionNewAdmin } from '../services/auth.service';
 import { connectToDatabase, closeDatabaseConnection } from './mongoClient';
 
 function readFlag(name: string): string | undefined {
@@ -25,13 +25,6 @@ async function run(): Promise<void> {
   const loginId = readFlag('login-id');
   const password = readFlag('password');
 
-  if (!force && (await adminExists())) {
-    // eslint-disable-next-line no-console
-    console.log('An admin account already exists. Re-run with --force to rotate credentials.');
-    await closeDatabaseConnection();
-    return;
-  }
-
   if ((loginId && !password) || (!loginId && password)) {
     // eslint-disable-next-line no-console
     console.error('Both --login-id and --password must be supplied together.');
@@ -40,15 +33,30 @@ async function run(): Promise<void> {
     return;
   }
 
-  const credentials =
-    loginId && password ? await provisionAdminWithCredentials(loginId, password) : await provisionAdmin();
+  try {
+    const credentials =
+      loginId && password
+        ? await provisionAdminWithCredentials(loginId, password, force)
+        : { ...(await provisionNewAdmin()), rotated: false };
 
-  // eslint-disable-next-line no-console
-  console.log('\nAdmin account provisioned. Store these credentials now — the password will not be shown again:\n');
-  // eslint-disable-next-line no-console
-  console.log(`  Login ID: ${credentials.loginId}`);
-  // eslint-disable-next-line no-console
-  console.log(`  Password: ${credentials.password}\n`);
+    // eslint-disable-next-line no-console
+    console.log(
+      `\n${credentials.rotated ? 'Password rotated' : 'New login provisioned'}. Store these credentials now — the password will not be shown again:\n`
+    );
+    // eslint-disable-next-line no-console
+    console.log(`  Login ID: ${credentials.loginId}`);
+    // eslint-disable-next-line no-console
+    console.log(`  Password: ${credentials.password}\n`);
+  } catch (err) {
+    if (err instanceof LoginIdTakenError) {
+      // eslint-disable-next-line no-console
+      console.error(`${err.message}. Re-run with --force to rotate its password instead.`);
+      await closeDatabaseConnection();
+      process.exit(1);
+      return;
+    }
+    throw err;
+  }
 
   await closeDatabaseConnection();
 }
@@ -58,6 +66,6 @@ run()
   .catch(async (err) => {
     await closeDatabaseConnection();
     // eslint-disable-next-line no-console
-    console.error('Failed to provision admin account:', err);
+    console.error('Failed to provision login:', err);
     process.exit(1);
   });

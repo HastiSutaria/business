@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ok, created } from '../utils/response';
 import { AppError } from '../utils/errors';
+import { getUserId } from '../utils/reqUser';
 import { transactionSchema, transactionUpdateSchema } from '../validators/transaction.validator';
 import * as transactionService from '../services/transaction.service';
 import { clientsStore } from '../database/repositories';
@@ -50,9 +51,10 @@ function resolveDatePreset(preset?: string): { from?: string; to?: string } {
 }
 
 export const getTransactions = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
   const { metal, type, clientId, search, datePreset, from, to, page, pageSize } = req.query;
 
-  let transactions = await transactionService.listTransactions();
+  let transactions = await transactionService.listTransactions(userId);
 
   const preset = resolveDatePreset(typeof datePreset === 'string' ? datePreset : undefined);
   const effectiveFrom = typeof from === 'string' && from ? from : preset.from;
@@ -79,42 +81,49 @@ export const getTransactions = asyncHandler(async (req: Request, res: Response) 
 });
 
 export const getTransaction = asyncHandler(async (req: Request, res: Response) => {
-  const txn = await transactionService.getTransactionById(req.params.id);
+  const userId = getUserId(req);
+  const txn = await transactionService.getTransactionById(userId, req.params.id);
   ok(res, txn);
 });
 
 export const createTransactionHandler = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
   const parsed = transactionSchema.safeParse(req.body);
   if (!parsed.success) throw AppError.validation(parsed.error.flatten());
-  const txn = await transactionService.createTransaction(parsed.data);
+  const txn = await transactionService.createTransaction(userId, parsed.data);
   created(res, txn);
 });
 
 export const updateTransactionHandler = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
   const parsed = transactionUpdateSchema.safeParse(req.body);
   if (!parsed.success) throw AppError.validation(parsed.error.flatten());
-  const txn = await transactionService.updateTransaction(req.params.id, parsed.data);
+  const txn = await transactionService.updateTransaction(userId, req.params.id, parsed.data);
   ok(res, txn);
 });
 
 export const deleteTransactionHandler = asyncHandler(async (req: Request, res: Response) => {
-  await transactionService.deleteTransaction(req.params.id);
+  const userId = getUserId(req);
+  await transactionService.deleteTransaction(userId, req.params.id);
   ok(res, { id: req.params.id });
 });
 
 export const undoDeleteTransactionHandler = asyncHandler(async (req: Request, res: Response) => {
-  const txn = await transactionService.undoDeleteTransaction(req.params.id);
+  const userId = getUserId(req);
+  const txn = await transactionService.undoDeleteTransaction(userId, req.params.id);
   ok(res, txn);
 });
 
 export const duplicateTransactionHandler = asyncHandler(async (req: Request, res: Response) => {
-  const txn = await transactionService.duplicateTransaction(req.params.id);
+  const userId = getUserId(req);
+  const txn = await transactionService.duplicateTransaction(userId, req.params.id);
   created(res, txn);
 });
 
 export const exportTransactionsCsv = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
   const { metal, type, clientId, from, to, search } = req.query;
-  let transactions = await transactionService.listTransactions();
+  let transactions = await transactionService.listTransactions(userId);
   transactions = transactionService.applyFilters(transactions, {
     metal: metal === 'GOLD' || metal === 'SILVER' ? metal : undefined,
     type: type === 'BUY' || type === 'SELL' ? type : undefined,
@@ -123,7 +132,8 @@ export const exportTransactionsCsv = asyncHandler(async (req: Request, res: Resp
     to: typeof to === 'string' ? to : undefined,
     search: typeof search === 'string' ? search : undefined,
   });
-  const clients = await clientsStore.read();
+  const allClients = await clientsStore.read();
+  const clients = allClients.filter((c) => c.userId === userId);
   const csv = transactionsToCsv(transactions, clients);
 
   res.setHeader('Content-Type', 'text/csv');

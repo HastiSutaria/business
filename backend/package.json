@@ -10,6 +10,8 @@
     "start": "node dist/server.js",
     "seed": "ts-node src/utils/seed.ts",
     "create-admin": "ts-node src/utils/createAdmin.ts",
+    "list-users": "ts-node src/utils/listAdmins.ts",
+    "migrate-to-user": "ts-node src/utils/migrateExistingDataToUser.ts",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\""
   },

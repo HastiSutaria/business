@@ -14,6 +14,10 @@
  * edit/delete of historical transactions), we rebuild a client's entire
  * ledger from its transactions + settlements every time something changes.
  * This guarantees the running balance can never drift out of sync.
+ *
+ * Every read/write here is additionally scoped by userId (tenant), even
+ * though clientId alone would already disambiguate — defense in depth
+ * against a client/transaction ever ending up mis-owned.
  */
 import { clientsStore, ledgerStore, paymentsStore, transactionsStore } from '../database/repositories';
 import { LedgerEntry, Settlement, Transaction } from '../types';
@@ -54,7 +58,7 @@ function toChronoItems(transactions: Transaction[], settlements: Settlement[]): 
 }
 
 /** Recompute and persist ledger entries for a single client. Pure function over the store. */
-export async function rebuildClientLedger(clientId: string): Promise<LedgerEntry[]> {
+export async function rebuildClientLedger(userId: string, clientId: string): Promise<LedgerEntry[]> {
   const [clients, transactions, settlements, fullLedger] = await Promise.all([
     clientsStore.read(),
     transactionsStore.read(),
@@ -62,9 +66,9 @@ export async function rebuildClientLedger(clientId: string): Promise<LedgerEntry
     ledgerStore.read(),
   ]);
 
-  const client = clients.find((c) => c.id === clientId);
-  const clientTransactions = transactions.filter((t) => t.clientId === clientId);
-  const clientSettlements = settlements.filter((s) => s.clientId === clientId);
+  const client = clients.find((c) => c.id === clientId && c.userId === userId);
+  const clientTransactions = transactions.filter((t) => t.clientId === clientId && t.userId === userId);
+  const clientSettlements = settlements.filter((s) => s.clientId === clientId && s.userId === userId);
   const items = toChronoItems(clientTransactions, clientSettlements);
 
   let balance = client?.openingBalance ?? 0;
@@ -73,6 +77,7 @@ export async function rebuildClientLedger(clientId: string): Promise<LedgerEntry
   if (client && client.openingBalance !== 0) {
     newEntries.push({
       id: `opening-${client.id}`,
+      userId,
       clientId,
       date: client.createdAt.slice(0, 10),
       type: 'TRANSACTION',
@@ -101,6 +106,7 @@ export async function rebuildClientLedger(clientId: string): Promise<LedgerEntry
       description = `${t.type} ${t.metal} ${t.quantity}g @ ₹${t.rate}`;
       newEntries.push({
         id: `txn-${t.id}`,
+        userId,
         clientId,
         date: t.date,
         type: 'TRANSACTION',
@@ -122,6 +128,7 @@ export async function rebuildClientLedger(clientId: string): Promise<LedgerEntry
       description = `Settlement via ${s.paymentMode}${s.referenceNumber ? ` (${s.referenceNumber})` : ''}`;
       newEntries.push({
         id: `stl-${s.id}`,
+        userId,
         clientId,
         date: s.date,
         type: 'SETTLEMENT',
@@ -135,41 +142,42 @@ export async function rebuildClientLedger(clientId: string): Promise<LedgerEntry
     }
   }
 
-  const otherClientsLedger = fullLedger.filter((e) => e.clientId !== clientId);
-  await ledgerStore.write([...otherClientsLedger, ...newEntries]);
+  const otherLedgerEntries = fullLedger.filter((e) => !(e.clientId === clientId && e.userId === userId));
+  await ledgerStore.write([...otherLedgerEntries, ...newEntries]);
 
   return newEntries;
 }
 
-export async function rebuildAllLedgers(): Promise<void> {
+export async function rebuildAllLedgers(userId: string): Promise<void> {
   const clients = await clientsStore.read();
-  for (const client of clients) {
-    await rebuildClientLedger(client.id);
+  for (const client of clients.filter((c) => c.userId === userId)) {
+    await rebuildClientLedger(userId, client.id);
   }
 }
 
 /** Current outstanding balance for a client: positive = receivable, negative = payable. */
-export async function getClientOutstanding(clientId: string): Promise<number> {
+export async function getClientOutstanding(userId: string, clientId: string): Promise<number> {
   const ledger = await ledgerStore.read();
-  const entries = ledger.filter((e) => e.clientId === clientId);
+  const entries = ledger.filter((e) => e.clientId === clientId && e.userId === userId);
   if (entries.length === 0) {
     const clients = await clientsStore.read();
-    return clients.find((c) => c.id === clientId)?.openingBalance ?? 0;
+    return clients.find((c) => c.id === clientId && c.userId === userId)?.openingBalance ?? 0;
   }
   return entries[entries.length - 1].runningBalance;
 }
 
-/** Current outstanding balance for every client: positive = receivable, negative = payable. */
-export async function getAllOutstandingBalances(): Promise<Map<string, number>> {
+/** Current outstanding balance for every client of this tenant: positive = receivable, negative = payable. */
+export async function getAllOutstandingBalances(userId: string): Promise<Map<string, number>> {
   const [clients, ledger] = await Promise.all([clientsStore.read(), ledgerStore.read()]);
 
   const lastEntryByClient = new Map<string, LedgerEntry>();
   for (const entry of ledger) {
+    if (entry.userId !== userId) continue;
     lastEntryByClient.set(entry.clientId, entry);
   }
 
   const balances = new Map<string, number>();
-  for (const client of clients) {
+  for (const client of clients.filter((c) => c.userId === userId)) {
     const lastEntry = lastEntryByClient.get(client.id);
     balances.set(client.id, lastEntry ? lastEntry.runningBalance : client.openingBalance);
   }
@@ -182,9 +190,9 @@ export async function getAllOutstandingBalances(): Promise<Map<string, number>> 
  * balance entry is dated at client creation time, which can sort after backdated
  * transactions if re-sorted, even though its runningBalance is only valid as the first entry.
  */
-export async function getClientLedger(clientId: string): Promise<LedgerEntry[]> {
+export async function getClientLedger(userId: string, clientId: string): Promise<LedgerEntry[]> {
   const ledger = await ledgerStore.read();
-  return ledger.filter((e) => e.clientId === clientId);
+  return ledger.filter((e) => e.clientId === clientId && e.userId === userId);
 }
 
 /**
@@ -195,9 +203,9 @@ export async function getClientLedger(clientId: string): Promise<LedgerEntry[]> 
  * before that point is considered squared away and must not resurface here after a
  * later, unrelated transaction is added for the same client.
  */
-export async function getClientPendingTransactions(clientId: string): Promise<Transaction[]> {
+export async function getClientPendingTransactions(userId: string, clientId: string): Promise<Transaction[]> {
   const [ledger, transactions] = await Promise.all([ledgerStore.read(), transactionsStore.read()]);
-  const clientLedger = ledger.filter((e) => e.clientId === clientId);
+  const clientLedger = ledger.filter((e) => e.clientId === clientId && e.userId === userId);
 
   let lastZeroIndex = -1;
   clientLedger.forEach((entry, index) => {
@@ -212,6 +220,6 @@ export async function getClientPendingTransactions(clientId: string): Promise<Tr
   );
 
   return transactions
-    .filter((t) => pendingIds.has(t.id))
+    .filter((t) => pendingIds.has(t.id) && t.userId === userId)
     .sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
 }

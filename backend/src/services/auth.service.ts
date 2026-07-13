@@ -12,7 +12,7 @@ const LOCKOUT_MS = 15 * 60 * 1000;
 const LOGIN_ID_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars (0/O, 1/I)
 const PASSWORD_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%^&*';
 
-// Precomputed once so a "no account exists yet" lookup takes the same time as a real password check.
+// Precomputed once so a "no such login id" lookup takes the same time as a real password check.
 const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-constant-time-comparison', BCRYPT_ROUNDS);
 
 function randomString(length: number, alphabet: string): string {
@@ -30,49 +30,71 @@ export function generateCredentials(): { loginId: string; password: string } {
   return { loginId, password };
 }
 
+export async function findAdminByLoginId(loginId: string): Promise<AdminUser | undefined> {
+  const all = await adminUserStore.read();
+  return all.find((a) => a.loginId === loginId);
+}
+
+export async function listAdmins(): Promise<Array<{ id: string; loginId: string; createdAt: string }>> {
+  const all = await adminUserStore.read();
+  return all.map((a) => ({ id: a.id, loginId: a.loginId, createdAt: a.createdAt }));
+}
+
 /**
- * Creates (or replaces) the single admin account with freshly generated credentials.
+ * Adds a brand-new tenant with freshly generated credentials. Retries on the
+ * astronomically unlikely chance of a loginId collision.
  * Returns the plaintext credentials — this is the only moment they are ever visible.
  */
-export async function provisionAdmin(): Promise<{ loginId: string; password: string }> {
-  const { loginId, password } = generateCredentials();
-  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-  const now = new Date().toISOString();
+export async function provisionNewAdmin(): Promise<{ loginId: string; password: string }> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { loginId, password } = generateCredentials();
+    if (await findAdminByLoginId(loginId)) continue;
 
-  await adminUserStore.write({
-    id: uuid(),
-    loginId,
-    passwordHash,
-    failedAttempts: 0,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  return { loginId, password };
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const now = new Date().toISOString();
+    await adminUserStore.update((current) => [
+      ...current,
+      { id: uuid(), loginId, passwordHash, failedAttempts: 0, createdAt: now, updatedAt: now },
+    ]);
+    return { loginId, password };
+  }
+  throw new Error('Failed to generate a unique login id after several attempts');
 }
 
-/** Same as provisionAdmin, but with a caller-supplied loginId/password (e.g. a fixed one for local testing). */
+export class LoginIdTakenError extends Error {
+  constructor(loginId: string) {
+    super(`Login ID "${loginId}" is already in use`);
+  }
+}
+
+/**
+ * Creates a tenant with a caller-supplied loginId/password, or rotates the password
+ * of an existing one with that loginId when `allowRotate` is true.
+ */
 export async function provisionAdminWithCredentials(
   loginId: string,
-  password: string
-): Promise<{ loginId: string; password: string }> {
+  password: string,
+  allowRotate: boolean
+): Promise<{ loginId: string; password: string; rotated: boolean }> {
+  const existing = await findAdminByLoginId(loginId);
+  if (existing && !allowRotate) {
+    throw new LoginIdTakenError(loginId);
+  }
+
   const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
   const now = new Date().toISOString();
 
-  await adminUserStore.write({
-    id: uuid(),
-    loginId,
-    passwordHash,
-    failedAttempts: 0,
-    createdAt: now,
-    updatedAt: now,
+  await adminUserStore.update((current) => {
+    const index = current.findIndex((a) => a.loginId === loginId);
+    if (index === -1) {
+      return [...current, { id: uuid(), loginId, passwordHash, failedAttempts: 0, createdAt: now, updatedAt: now }];
+    }
+    const next = [...current];
+    next[index] = { ...next[index], passwordHash, failedAttempts: 0, lockedUntil: undefined, updatedAt: now };
+    return next;
   });
 
-  return { loginId, password };
-}
-
-export async function adminExists(): Promise<boolean> {
-  return (await adminUserStore.read()) !== null;
+  return { loginId, password, rotated: Boolean(existing) };
 }
 
 function registerFailedAttempt(current: AdminUser): AdminUser {
@@ -92,29 +114,37 @@ function isLocked(admin: AdminUser): boolean {
  * so all pass/fail decisions are made by inspecting the returned record afterwards.
  */
 export async function verifyLogin(loginId: string, password: string): Promise<AdminUser> {
-  const result = await adminUserStore.update(async (current) => {
-    if (!current) {
+  const trimmedLoginId = loginId.trim();
+  let matchedId: string | undefined;
+
+  const all = await adminUserStore.update(async (current) => {
+    const index = current.findIndex((a) => a.loginId === trimmedLoginId);
+
+    if (index === -1) {
       await bcrypt.compare(password, DUMMY_HASH);
       return current;
     }
 
-    if (isLocked(current)) {
+    const target = current[index];
+    matchedId = target.id;
+
+    if (isLocked(target)) {
       return current;
     }
 
-    const loginIdMatches = current.loginId === loginId.trim();
-    const passwordMatches = await bcrypt.compare(password, current.passwordHash);
-
-    if (!loginIdMatches || !passwordMatches) {
-      return registerFailedAttempt(current);
-    }
-
-    return { ...current, failedAttempts: 0, lockedUntil: undefined, updatedAt: new Date().toISOString() };
+    const passwordMatches = await bcrypt.compare(password, target.passwordHash);
+    const next = [...current];
+    next[index] = passwordMatches
+      ? { ...target, failedAttempts: 0, lockedUntil: undefined, updatedAt: new Date().toISOString() }
+      : registerFailedAttempt(target);
+    return next;
   });
 
-  if (!result) {
+  if (!matchedId) {
     throw AppError.unauthorized('Invalid login ID or password');
   }
+
+  const result = all.find((a) => a.id === matchedId) as AdminUser;
 
   if (isLocked(result)) {
     const minutesLeft = Math.ceil((new Date(result.lockedUntil as string).getTime() - Date.now()) / 60000);

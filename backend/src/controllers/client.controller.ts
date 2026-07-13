@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ok, created } from '../utils/response';
 import { AppError } from '../utils/errors';
+import { getUserId } from '../utils/reqUser';
 import { clientSchema, clientUpdateSchema } from '../validators/client.validator';
 import * as clientService from '../services/client.service';
 import {
@@ -12,8 +13,9 @@ import {
 } from '../services/ledger.service';
 
 export const getClients = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
   const { search, sortBy, sortDir } = req.query;
-  let clients = await clientService.listClients();
+  let clients = await clientService.listClients(userId);
 
   if (typeof search === 'string' && search.trim()) {
     const q = search.trim().toLowerCase();
@@ -37,31 +39,39 @@ export const getClients = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const getClient = asyncHandler(async (req: Request, res: Response) => {
-  const client = await clientService.getClientById(req.params.id);
+  const userId = getUserId(req);
+  const client = await clientService.getClientById(userId, req.params.id);
   ok(res, client);
 });
 
 export const createClientHandler = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
   const parsed = clientSchema.safeParse(req.body);
   if (!parsed.success) throw AppError.validation(parsed.error.flatten());
-  const client = await clientService.createClient(parsed.data);
+  const client = await clientService.createClient(userId, parsed.data);
   created(res, client);
 });
 
 export const updateClientHandler = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
   const parsed = clientUpdateSchema.safeParse(req.body);
   if (!parsed.success) throw AppError.validation(parsed.error.flatten());
-  const client = await clientService.updateClient(req.params.id, parsed.data);
+  const client = await clientService.updateClient(userId, req.params.id, parsed.data);
   ok(res, client);
 });
 
 export const deleteClientHandler = asyncHandler(async (req: Request, res: Response) => {
-  await clientService.deleteClient(req.params.id);
+  const userId = getUserId(req);
+  await clientService.deleteClient(userId, req.params.id);
   ok(res, { id: req.params.id });
 });
 
-export const getClientsOutstandingHandler = asyncHandler(async (_req: Request, res: Response) => {
-  const [clients, balances] = await Promise.all([clientService.listClients(), getAllOutstandingBalances()]);
+export const getClientsOutstandingHandler = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
+  const [clients, balances] = await Promise.all([
+    clientService.listClients(userId),
+    getAllOutstandingBalances(userId),
+  ]);
   const result = clients
     .map((client) => ({ client, outstanding: balances.get(client.id) ?? 0 }))
     .sort((a, b) => Math.abs(b.outstanding) - Math.abs(a.outstanding));
@@ -69,19 +79,21 @@ export const getClientsOutstandingHandler = asyncHandler(async (_req: Request, r
 });
 
 export const getClientLedgerHandler = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
   const [ledger, outstanding, client] = await Promise.all([
-    getClientLedger(req.params.id),
-    getClientOutstanding(req.params.id),
-    clientService.getClientById(req.params.id),
+    getClientLedger(userId, req.params.id),
+    getClientOutstanding(userId, req.params.id),
+    clientService.getClientById(userId, req.params.id),
   ]);
   ok(res, { client, ledger, outstanding });
 });
 
 export const getClientPendingTransactionsHandler = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
   const [transactions, outstanding, client] = await Promise.all([
-    getClientPendingTransactions(req.params.id),
-    getClientOutstanding(req.params.id),
-    clientService.getClientById(req.params.id),
+    getClientPendingTransactions(userId, req.params.id),
+    getClientOutstanding(userId, req.params.id),
+    clientService.getClientById(userId, req.params.id),
   ]);
   ok(res, { client, transactions, outstanding });
 });

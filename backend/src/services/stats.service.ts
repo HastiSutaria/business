@@ -1,8 +1,9 @@
 /**
  * Aggregation logic shared by the dashboard and reports endpoints.
  * Everything here is computed fresh from transactions/ledger/payments
- * (the source of truth) rather than read from the statistics.json cache,
+ * (the source of truth) rather than read from the statistics cache,
  * so results are always correct even if the cache write is skipped/fails.
+ * Every read is scoped to a single tenant (userId).
  */
 import { clientsStore, ledgerStore, paymentsStore, statisticsStore, transactionsStore } from '../database/repositories';
 import { Client, Metal, Settlement, Transaction } from '../types';
@@ -58,10 +59,13 @@ export interface DashboardStats {
   };
 }
 
-async function computeOutstandingTotals(): Promise<{ receivable: number; payable: number; byClient: Map<string, number> }> {
+async function computeOutstandingTotals(
+  userId: string
+): Promise<{ receivable: number; payable: number; byClient: Map<string, number> }> {
   const ledger = await ledgerStore.read();
   const byClient = new Map<string, number>();
   for (const entry of ledger) {
+    if (entry.userId !== userId) continue;
     byClient.set(entry.clientId, entry.runningBalance);
   }
   let receivable = 0;
@@ -97,16 +101,19 @@ function lastNMonths(n: number): Array<{ label: string; year: number; month: num
   return months;
 }
 
-export async function computeDashboardStats(): Promise<DashboardStats> {
-  const [transactions, clients, settlements] = await Promise.all([
+export async function computeDashboardStats(userId: string): Promise<DashboardStats> {
+  const [allTransactions, allClients, allSettlements] = await Promise.all([
     transactionsStore.read(),
     clientsStore.read(),
     paymentsStore.read(),
   ]);
+  const transactions = allTransactions.filter((t) => t.userId === userId);
+  const clients = allClients.filter((c) => c.userId === userId);
+  const settlements = allSettlements.filter((s) => s.userId === userId);
 
   const today = startOfToday();
   const todayTxns = transactions.filter((t) => isSameDay(t.date, today));
-  const { receivable, payable, byClient } = await computeOutstandingTotals();
+  const { receivable, payable, byClient } = await computeOutstandingTotals(userId);
 
   const clientNameById = new Map<string, Client>(clients.map((c) => [c.id, c]));
 
@@ -163,7 +170,8 @@ export async function computeDashboardStats(): Promise<DashboardStats> {
 
   // Outstanding trend: cumulative receivable/payable snapshot at each of the last 14 days,
   // approximated from ledger entries up to and including that date.
-  const ledger = await ledgerStore.read();
+  const allLedger = await ledgerStore.read();
+  const ledger = allLedger.filter((e) => e.userId === userId);
   const outstandingTrend = days.map((date) => {
     const balancesUpToDate = new Map<string, number>();
     for (const entry of ledger) {
@@ -198,15 +206,24 @@ export async function computeDashboardStats(): Promise<DashboardStats> {
   return stats;
 }
 
-export async function cacheStatistics(): Promise<void> {
-  const stats = await computeDashboardStats();
-  await statisticsStore.write({
-    generatedAt: new Date().toISOString(),
-    totalProfit: stats.totalProfit,
-    outstandingReceivable: stats.outstandingReceivable,
-    outstandingPayable: stats.outstandingPayable,
-    goldQuantity: stats.goldQuantity,
-    silverQuantity: stats.silverQuantity,
+export async function cacheStatistics(userId: string): Promise<void> {
+  const stats = await computeDashboardStats(userId);
+  const generatedAt = new Date().toISOString();
+  await statisticsStore.update((current) => {
+    const index = current.findIndex((s) => s.userId === userId);
+    const record = {
+      userId,
+      generatedAt,
+      totalProfit: stats.totalProfit,
+      outstandingReceivable: stats.outstandingReceivable,
+      outstandingPayable: stats.outstandingPayable,
+      goldQuantity: stats.goldQuantity,
+      silverQuantity: stats.silverQuantity,
+    };
+    if (index === -1) return [...current, record];
+    const next = [...current];
+    next[index] = record;
+    return next;
   });
 }
 
@@ -268,13 +285,18 @@ export interface ClientReport {
   profit: number;
 }
 
-export async function buildClientReport(clientId: string, transactions: Transaction[], settlements: Settlement[]): Promise<ClientReport> {
+export async function buildClientReport(
+  userId: string,
+  clientId: string,
+  transactions: Transaction[],
+  settlements: Settlement[]
+): Promise<ClientReport> {
   const clientTxns = transactions.filter((t) => t.clientId === clientId);
   const clientSettlements = settlements.filter((s) => s.clientId === clientId);
   const totalBuy = clientTxns.filter((t) => t.type === 'BUY').reduce((s, t) => s + t.amount, 0);
   const totalSell = clientTxns.filter((t) => t.type === 'SELL').reduce((s, t) => s + t.amount, 0);
   const totalSettled = clientSettlements.reduce((s, x) => s + x.amount, 0);
-  const { byClient } = await computeOutstandingTotals();
+  const { byClient } = await computeOutstandingTotals(userId);
   return {
     totalBuy,
     totalSell,

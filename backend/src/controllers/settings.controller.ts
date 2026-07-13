@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ok, created } from '../utils/response';
 import { AppError } from '../utils/errors';
-import { settingsStore } from '../database/repositories';
+import { getUserId } from '../utils/reqUser';
+import { getSettingsForUser, updateSettingsForUser } from '../services/settings.service';
 import * as backupService from '../services/backup.service';
 
 const settingsSchema = z.object({
@@ -15,39 +16,45 @@ const settingsSchema = z.object({
   silverUnit: z.enum(['gram', 'kg']).optional(),
 });
 
-export const getSettings = asyncHandler(async (_req: Request, res: Response) => {
-  const settings = await settingsStore.read();
+export const getSettings = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
+  const settings = await getSettingsForUser(userId);
   ok(res, settings);
 });
 
 export const updateSettings = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
   const parsed = settingsSchema.safeParse(req.body);
   if (!parsed.success) throw AppError.validation(parsed.error.flatten());
-  const updated = await settingsStore.update((current) => ({ ...current, ...parsed.data }));
+  const updated = await updateSettingsForUser(userId, parsed.data);
   ok(res, updated);
 });
 
-export const createBackupHandler = asyncHandler(async (_req: Request, res: Response) => {
-  const backup = await backupService.createBackup();
+export const createBackupHandler = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
+  const backup = await backupService.createBackup(userId);
   created(res, backup);
 });
 
-export const listBackupsHandler = asyncHandler(async (_req: Request, res: Response) => {
-  ok(res, backupService.listBackups());
+export const listBackupsHandler = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
+  ok(res, backupService.listBackups(userId));
 });
 
 export const restoreBackupHandler = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
   const schema = z.object({ fileName: z.string().min(1) });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) throw AppError.validation(parsed.error.flatten());
-  await backupService.restoreBackup(parsed.data.fileName);
+  await backupService.restoreBackup(userId, parsed.data.fileName);
   ok(res, { restored: true });
 });
 
 export const masterResetHandler = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
   const schema = z.object({ confirmation: z.string() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) throw AppError.validation(parsed.error.flatten());
-  await backupService.masterReset(parsed.data.confirmation);
+  await backupService.masterReset(userId, parsed.data.confirmation);
   ok(res, { reset: true });
 });
