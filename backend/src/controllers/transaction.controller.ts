@@ -3,7 +3,7 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { ok, created } from '../utils/response';
 import { AppError } from '../utils/errors';
 import { getUserId } from '../utils/reqUser';
-import { transactionSchema, transactionUpdateSchema } from '../validators/transaction.validator';
+import { transactionSchema, transactionUpdateSchema, transactionBulkSchema } from '../validators/transaction.validator';
 import * as transactionService from '../services/transaction.service';
 import { clientsStore } from '../database/repositories';
 import { transactionsToCsv } from '../services/export.service';
@@ -92,6 +92,14 @@ export const createTransactionHandler = asyncHandler(async (req: Request, res: R
   if (!parsed.success) throw AppError.validation(parsed.error.flatten());
   const txn = await transactionService.createTransaction(userId, parsed.data);
   created(res, txn);
+});
+
+export const createTransactionsBulkHandler = asyncHandler(async (req: Request, res: Response) => {
+  const userId = getUserId(req);
+  const parsed = transactionBulkSchema.safeParse(req.body);
+  if (!parsed.success) throw AppError.validation(parsed.error.flatten());
+  const txns = await transactionService.createTransactions(userId, parsed.data);
+  created(res, txns);
 });
 
 export const updateTransactionHandler = asyncHandler(async (req: Request, res: Response) => {

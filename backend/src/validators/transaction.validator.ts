@@ -20,5 +20,19 @@ export const transactionSchema = z.object({
 
 export const transactionUpdateSchema = transactionSchema.partial();
 
+export const transactionBulkSchema = transactionSchema
+  .omit({ quantity: true, rate: true })
+  .extend({
+    rows: z
+      .array(
+        z.object({
+          quantity: z.number({ invalid_type_error: 'Quantity is required' }).positive('Quantity must be greater than 0'),
+          rate: z.number({ invalid_type_error: 'Rate is required' }).positive('Rate must be greater than 0'),
+        })
+      )
+      .min(1, 'At least one row is required'),
+  });
+
 export type TransactionInput = z.infer<typeof transactionSchema>;
 export type TransactionUpdateInput = z.infer<typeof transactionUpdateSchema>;
+export type TransactionBulkInput = z.infer<typeof transactionBulkSchema>;

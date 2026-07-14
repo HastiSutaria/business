@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { transactionsApi, TransactionFilters, TransactionInput } from '@/services/transactions.service';
+import { transactionsApi, TransactionFilters, TransactionInput, TransactionBulkInput } from '@/services/transactions.service';
 import { ApiRequestError } from '@/services/apiClient';
 import { useToast } from '@/contexts/ToastContext';
 import { clientKeys } from './useClients';
@@ -43,6 +43,19 @@ export function useCreateTransaction() {
     onSuccess: () => {
       invalidateEverything(queryClient);
       showToast('Transaction recorded', 'success');
+    },
+    onError: (err: ApiRequestError) => showToast(err.message, 'error'),
+  });
+}
+
+export function useCreateTransactionsBulk() {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  return useMutation({
+    mutationFn: (input: TransactionBulkInput) => transactionsApi.createBulk(input),
+    onSuccess: (created) => {
+      invalidateEverything(queryClient);
+      showToast(`${created.length} transactions recorded`, 'success');
     },
     onError: (err: ApiRequestError) => showToast(err.message, 'error'),
   });

@@ -20,7 +20,20 @@
  * against a client/transaction ever ending up mis-owned.
  */
 import { clientsStore, ledgerStore, paymentsStore, transactionsStore } from '../database/repositories';
-import { LedgerEntry, Settlement, Transaction } from '../types';
+import { LedgerEntry, Metal, Settlement, Transaction } from '../types';
+
+/** Silver is traded/quoted per kg in the UI; gold per gram. Storage always keeps grams and per-gram rate. */
+const GRAMS_PER_KG = 1000;
+
+function describeQuantity(metal: Metal, quantityGrams: number): string {
+  return metal === 'SILVER'
+    ? `${Math.round((quantityGrams / GRAMS_PER_KG) * 1000) / 1000}kg`
+    : `${quantityGrams}g`;
+}
+
+function describeRate(metal: Metal, ratePerGram: number): string {
+  return metal === 'SILVER' ? `${Math.round(ratePerGram * GRAMS_PER_KG * 100) / 100}` : `${ratePerGram}`;
+}
 
 interface ChronoItem {
   date: string;
@@ -103,7 +116,7 @@ export async function rebuildClientLedger(userId: string, clientId: string): Pro
         credit = t.amount;
       }
       balance = balance + credit - debit;
-      description = `${t.type} ${t.metal} ${t.quantity}g @ ₹${t.rate}`;
+      description = `${t.type} ${t.metal} ${describeQuantity(t.metal, t.quantity)} @ ₹${describeRate(t.metal, t.rate)}`;
       newEntries.push({
         id: `txn-${t.id}`,
         userId,

@@ -3,6 +3,7 @@ import {
   getTransactions,
   getTransaction,
   createTransactionHandler,
+  createTransactionsBulkHandler,
   updateTransactionHandler,
   deleteTransactionHandler,
   undoDeleteTransactionHandler,
@@ -16,6 +17,7 @@ router.get('/export/csv', exportTransactionsCsv);
 router.get('/', getTransactions);
 router.get('/:id', getTransaction);
 router.post('/', createTransactionHandler);
+router.post('/bulk', createTransactionsBulkHandler);
 router.post('/:id/duplicate', duplicateTransactionHandler);
 router.post('/:id/undo-delete', undoDeleteTransactionHandler);
 router.put('/:id', updateTransactionHandler);

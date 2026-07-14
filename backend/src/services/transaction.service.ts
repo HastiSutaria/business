@@ -1,7 +1,7 @@
 import { v4 as uuid } from 'uuid';
 import { clientsStore, transactionsStore } from '../database/repositories';
 import { Transaction } from '../types';
-import { TransactionInput, TransactionUpdateInput } from '../validators/transaction.validator';
+import { TransactionInput, TransactionUpdateInput, TransactionBulkInput } from '../validators/transaction.validator';
 import { AppError } from '../utils/errors';
 import { rebuildClientLedger } from './ledger.service';
 import { cacheStatistics } from './stats.service';
@@ -70,6 +70,33 @@ export async function createTransaction(userId: string, input: TransactionInput)
   await rebuildClientLedger(userId, transaction.clientId);
   await cacheStatistics(userId);
   return transaction;
+}
+
+export async function createTransactions(userId: string, input: TransactionBulkInput): Promise<Transaction[]> {
+  await assertClientExists(userId, input.clientId);
+  const now = new Date().toISOString();
+  const newTransactions: Transaction[] = input.rows.map((row) => ({
+    id: uuid(),
+    userId,
+    clientId: input.clientId,
+    metal: input.metal,
+    type: input.type,
+    quantity: row.quantity,
+    rate: row.rate,
+    amount: computeAmount(row.quantity, row.rate),
+    date: input.date,
+    time: input.time,
+    remarks: input.remarks ?? '',
+    createdBy: input.createdBy ?? 'Admin',
+    createdAt: now,
+    updatedAt: now,
+  }));
+
+  await transactionsStore.update((current) => [...current, ...newTransactions]);
+
+  await rebuildClientLedger(userId, input.clientId);
+  await cacheStatistics(userId);
+  return newTransactions;
 }
 
 export async function duplicateTransaction(userId: string, id: string): Promise<Transaction> {

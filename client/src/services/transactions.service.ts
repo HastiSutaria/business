@@ -13,6 +13,17 @@ export interface TransactionInput {
   createdBy?: string;
 }
 
+export interface TransactionBulkInput {
+  clientId: string;
+  metal: Metal;
+  type: TransactionType;
+  date: string;
+  time: string;
+  remarks?: string;
+  createdBy?: string;
+  rows: Array<{ quantity: number; rate: number }>;
+}
+
 export interface TransactionFilters {
   metal?: Metal;
   type?: TransactionType;
@@ -30,6 +41,8 @@ export const transactionsApi = {
     unwrap<Paginated<Transaction>>(apiClient.get('/transactions', { params: filters })),
   get: (id: string) => unwrap<Transaction>(apiClient.get(`/transactions/${id}`)),
   create: (input: TransactionInput) => unwrap<Transaction>(apiClient.post('/transactions', input)),
+  createBulk: (input: TransactionBulkInput) =>
+    unwrap<Transaction[]>(apiClient.post('/transactions/bulk', input)),
   update: (id: string, input: Partial<TransactionInput>) =>
     unwrap<Transaction>(apiClient.put(`/transactions/${id}`, input)),
   remove: (id: string) => unwrap<{ id: string }>(apiClient.delete(`/transactions/${id}`)),

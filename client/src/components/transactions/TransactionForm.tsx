@@ -1,19 +1,23 @@
 import { useEffect, useMemo } from 'react';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm, useFieldArray, useWatch, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useClientsQuery } from '@/hooks/useClients';
-import { useCreateTransaction, useUpdateTransaction } from '@/hooks/useTransactions';
+import { useCreateTransaction, useCreateTransactionsBulk, useUpdateTransaction } from '@/hooks/useTransactions';
 import { Transaction } from '@/types';
 import { formatCurrencyPrecise, nowTimeHm, todayIso } from '@/utils/format';
 import { toStorageQuantity, toDisplayQuantity, toStorageRate, toDisplayRate } from '@/utils/units';
+
+const rowSchema = z.object({
+  quantity: z.coerce.number().positive('Quantity must be greater than 0'),
+  rate: z.coerce.number().positive('Rate must be greater than 0'),
+});
 
 const formSchema = z.object({
   clientId: z.string().min(1, 'Select a client'),
   metal: z.enum(['GOLD', 'SILVER']),
   type: z.enum(['BUY', 'SELL']),
-  quantity: z.coerce.number().positive('Quantity must be greater than 0'),
-  rate: z.coerce.number().positive('Rate must be greater than 0'),
+  rows: z.array(rowSchema).min(1, 'Add at least one row'),
   date: z.string().min(1),
   time: z.string().min(1),
   remarks: z.string().optional(),
@@ -27,9 +31,12 @@ interface TransactionFormProps {
   defaultClientId?: string;
 }
 
+const blankRow = { quantity: undefined as unknown as number, rate: undefined as unknown as number };
+
 export function TransactionForm({ transaction, onDone, defaultClientId }: TransactionFormProps): JSX.Element {
   const { data: clients } = useClientsQuery();
   const createMutation = useCreateTransaction();
+  const createBulkMutation = useCreateTransactionsBulk();
   const updateMutation = useUpdateTransaction();
   const isEditing = Boolean(transaction);
 
@@ -48,13 +55,21 @@ export function TransactionForm({ transaction, onDone, defaultClientId }: Transa
       clientId: transaction?.clientId ?? defaultClientId ?? '',
       metal: transaction?.metal ?? 'SILVER',
       type: transaction?.type ?? 'BUY',
-      quantity: transaction ? toDisplayQuantity(transaction.metal, transaction.quantity) : undefined,
-      rate: transaction ? toDisplayRate(transaction.metal, transaction.rate) : undefined,
+      rows: transaction
+        ? [
+            {
+              quantity: toDisplayQuantity(transaction.metal, transaction.quantity),
+              rate: toDisplayRate(transaction.metal, transaction.rate),
+            },
+          ]
+        : [blankRow],
       date: transaction?.date ?? todayIso(),
       time: transaction?.time ?? nowTimeHm(),
       remarks: transaction?.remarks ?? '',
     },
   });
+
+  const { fields, append, remove } = useFieldArray({ control, name: 'rows' });
 
   useEffect(() => {
     if (transaction) {
@@ -62,8 +77,12 @@ export function TransactionForm({ transaction, onDone, defaultClientId }: Transa
         clientId: transaction.clientId,
         metal: transaction.metal,
         type: transaction.type,
-        quantity: toDisplayQuantity(transaction.metal, transaction.quantity),
-        rate: toDisplayRate(transaction.metal, transaction.rate),
+        rows: [
+          {
+            quantity: toDisplayQuantity(transaction.metal, transaction.quantity),
+            rate: toDisplayRate(transaction.metal, transaction.rate),
+          },
+        ],
         date: transaction.date,
         time: transaction.time,
         remarks: transaction.remarks ?? '',
@@ -78,34 +97,50 @@ export function TransactionForm({ transaction, onDone, defaultClientId }: Transa
   }, [clients, isEditing, defaultClientId, setValue, getValues]);
 
   const metal = watch('metal');
-  const quantity = watch('quantity');
-  const rate = watch('rate');
+  const rows = useWatch({ control, name: 'rows' });
   const computedAmount = useMemo(() => {
-    const q = Number(quantity);
-    const r = Number(rate);
-    if (!q || !r || Number.isNaN(q) || Number.isNaN(r)) return 0;
-    return q * r;
-  }, [quantity, rate]);
+    return (rows ?? []).reduce((sum, row) => {
+      const q = Number(row?.quantity);
+      const r = Number(row?.rate);
+      if (!q || !r || Number.isNaN(q) || Number.isNaN(r)) return sum;
+      return sum + q * r;
+    }, 0);
+  }, [rows]);
 
   const onSubmit = handleSubmit((values) => {
-    const payload = {
+    if (isEditing && transaction) {
+      const row = values.rows[0];
+      const payload = {
+        clientId: values.clientId,
+        metal: values.metal,
+        type: values.type,
+        quantity: toStorageQuantity(values.metal, row.quantity),
+        rate: toStorageRate(values.metal, row.rate),
+        date: values.date,
+        time: values.time,
+        remarks: values.remarks,
+      };
+      updateMutation.mutate({ id: transaction.id, input: payload }, { onSuccess: onDone });
+      return;
+    }
+
+    const shared = {
       clientId: values.clientId,
       metal: values.metal,
       type: values.type,
-      quantity: toStorageQuantity(values.metal, values.quantity),
-      rate: toStorageRate(values.metal, values.rate),
       date: values.date,
       time: values.time,
       remarks: values.remarks,
     };
+    const storageRows = values.rows.map((row) => ({
+      quantity: toStorageQuantity(values.metal, row.quantity),
+      rate: toStorageRate(values.metal, row.rate),
+    }));
 
-    if (isEditing && transaction) {
-      updateMutation.mutate(
-        { id: transaction.id, input: payload },
-        { onSuccess: onDone }
-      );
+    if (storageRows.length === 1) {
+      createMutation.mutate({ ...shared, ...storageRows[0] }, { onSuccess: onDone });
     } else {
-      createMutation.mutate(payload, { onSuccess: onDone });
+      createBulkMutation.mutate({ ...shared, rows: storageRows }, { onSuccess: onDone });
     }
   });
 
@@ -138,8 +173,10 @@ export function TransactionForm({ transaction, onDone, defaultClientId }: Transa
                     type="button"
                     onClick={() => {
                       field.onChange(m);
-                      setValue('quantity', undefined as unknown as number);
-                      setValue('rate', undefined as unknown as number);
+                      fields.forEach((_, index) => {
+                        setValue(`rows.${index}.quantity`, undefined as unknown as number);
+                        setValue(`rows.${index}.rate`, undefined as unknown as number);
+                      });
                     }}
                     className={`rounded-xl py-2.5 text-sm font-semibold border transition ${
                       field.value === m
@@ -183,29 +220,62 @@ export function TransactionForm({ transaction, onDone, defaultClientId }: Transa
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="label">Quantity ({metal === 'SILVER' ? 'kg' : 'grams'})</label>
-          <input
-            type="number"
-            step="0.001"
-            className="input"
-            placeholder={metal === 'SILVER' ? 'e.g. 50' : 'e.g. 10'}
-            {...register('quantity')}
-          />
-          {errors.quantity && <p className="text-xs text-loss mt-1">{errors.quantity.message}</p>}
-        </div>
-        <div>
-          <label className="label">Rate (per {metal === 'SILVER' ? 'kg' : 'gram'})</label>
-          <input
-            type="number"
-            step="0.01"
-            className="input"
-            placeholder={metal === 'SILVER' ? 'e.g. 92000' : 'e.g. 9600'}
-            {...register('rate')}
-          />
-          {errors.rate && <p className="text-xs text-loss mt-1">{errors.rate.message}</p>}
-        </div>
+      <div className="flex flex-col gap-3">
+        {fields.map((field, index) => (
+          <div key={field.id} className="flex items-start gap-2">
+            <div className="grid grid-cols-2 gap-3 flex-1">
+              <div>
+                {index === 0 && <label className="label">Quantity ({metal === 'SILVER' ? 'kg' : 'grams'})</label>}
+                <input
+                  type="number"
+                  step="0.001"
+                  className="input"
+                  placeholder={metal === 'SILVER' ? 'e.g. 50' : 'e.g. 10'}
+                  {...register(`rows.${index}.quantity` as const)}
+                />
+                {errors.rows?.[index]?.quantity && (
+                  <p className="text-xs text-loss mt-1">{errors.rows[index]?.quantity?.message}</p>
+                )}
+              </div>
+              <div>
+                {index === 0 && <label className="label">Rate (per {metal === 'SILVER' ? 'kg' : 'gram'})</label>}
+                <input
+                  type="number"
+                  step="0.01"
+                  className="input"
+                  placeholder={metal === 'SILVER' ? 'e.g. 92000' : 'e.g. 9600'}
+                  {...register(`rows.${index}.rate` as const)}
+                />
+                {errors.rows?.[index]?.rate && (
+                  <p className="text-xs text-loss mt-1">{errors.rows[index]?.rate?.message}</p>
+                )}
+              </div>
+            </div>
+            {!isEditing && (
+              <button
+                type="button"
+                onClick={() => remove(index)}
+                disabled={fields.length === 1}
+                className={`rounded-lg border px-2.5 text-sm font-semibold transition disabled:opacity-30 disabled:cursor-not-allowed border-gray-200 dark:border-gray-700 text-gray-400 hover:text-loss hover:border-loss ${
+                  index === 0 ? 'mt-8' : 'mt-3'
+                }`}
+                aria-label="Remove row"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        ))}
+
+        {!isEditing && (
+          <button
+            type="button"
+            onClick={() => append(blankRow)}
+            className="self-start rounded-lg border border-dashed border-gold-500 text-gold-600 dark:text-gold-400 px-3 py-1.5 text-sm font-semibold hover:bg-gold-500/10 transition"
+          >
+            + Add Row
+          </button>
+        )}
       </div>
 
       <div className="rounded-xl bg-gray-50 dark:bg-gray-800/60 px-4 py-3 flex items-center justify-between">
@@ -231,8 +301,12 @@ export function TransactionForm({ transaction, onDone, defaultClientId }: Transa
         <textarea className="input" rows={2} placeholder="Optional notes" {...register('remarks')} />
       </div>
 
-      <button type="submit" className="btn-primary w-full mt-1" disabled={isSubmitting}>
-        {isEditing ? 'Update Transaction' : 'Save Transaction'}
+      <button
+        type="submit"
+        className="btn-primary w-full mt-1"
+        disabled={isSubmitting || createBulkMutation.isPending}
+      >
+        {isEditing ? 'Update Transaction' : fields.length > 1 ? `Save ${fields.length} Transactions` : 'Save Transaction'}
       </button>
     </form>
   );
