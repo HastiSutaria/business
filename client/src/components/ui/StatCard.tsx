@@ -29,11 +29,11 @@ export function StatCard({ label, value, icon, tone = 'default', subtext }: Stat
   return (
     <div className="card p-4 flex flex-col gap-2 animate-fade-in">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</span>
+        <span className="text-sm font-medium text-gray-500 dark:text-gray-400">{label}</span>
         {icon && <span className={clsx('rounded-lg p-1.5', ICON_BG[tone])}>{icon}</span>}
       </div>
-      <span className={clsx('text-xl font-bold tracking-tight', TONE_STYLES[tone])}>{value}</span>
-      {subtext && <span className="text-xs text-gray-400">{subtext}</span>}
+      <span className={clsx('text-lg font-bold tracking-tight', TONE_STYLES[tone])}>{value}</span>
+      {subtext && <span className="text-sm text-gray-500 dark:text-gray-400">{subtext}</span>}
     </div>
   );
 }

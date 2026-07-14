@@ -127,6 +127,10 @@ export interface ClientReport {
   outstanding: number;
   totalSettled: number;
   profit: number;
+  goldBuyQuantity: number;
+  goldSellQuantity: number;
+  silverBuyQuantity: number;
+  silverSellQuantity: number;
 }
 
 export interface ClientLedgerResponse {

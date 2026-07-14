@@ -283,6 +283,10 @@ export interface ClientReport {
   outstanding: number;
   totalSettled: number;
   profit: number;
+  goldBuyQuantity: number;
+  goldSellQuantity: number;
+  silverBuyQuantity: number;
+  silverSellQuantity: number;
 }
 
 export async function buildClientReport(
@@ -297,12 +301,18 @@ export async function buildClientReport(
   const totalSell = clientTxns.filter((t) => t.type === 'SELL').reduce((s, t) => s + t.amount, 0);
   const totalSettled = clientSettlements.reduce((s, x) => s + x.amount, 0);
   const { byClient } = await computeOutstandingTotals(userId);
+  const goldTxns = clientTxns.filter((t) => t.metal === 'GOLD');
+  const silverTxns = clientTxns.filter((t) => t.metal === 'SILVER');
   return {
     totalBuy,
     totalSell,
     outstanding: byClient.get(clientId) ?? 0,
     totalSettled,
     profit: totalSell - totalBuy,
+    goldBuyQuantity: goldTxns.filter((t) => t.type === 'BUY').reduce((s, t) => s + t.quantity, 0),
+    goldSellQuantity: goldTxns.filter((t) => t.type === 'SELL').reduce((s, t) => s + t.quantity, 0),
+    silverBuyQuantity: silverTxns.filter((t) => t.type === 'BUY').reduce((s, t) => s + t.quantity, 0),
+    silverSellQuantity: silverTxns.filter((t) => t.type === 'SELL').reduce((s, t) => s + t.quantity, 0),
   };
 }
 

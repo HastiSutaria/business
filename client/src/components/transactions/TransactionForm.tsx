@@ -10,18 +10,42 @@ import { toStorageQuantity, toDisplayQuantity, toStorageRate, toDisplayRate } fr
 
 const rowSchema = z.object({
   quantity: z.coerce.number().positive('Quantity must be greater than 0'),
-  rate: z.coerce.number().positive('Rate must be greater than 0'),
+  rate: z.coerce.number().optional(),
+  amount: z.coerce.number().optional(),
 });
 
-const formSchema = z.object({
-  clientId: z.string().min(1, 'Select a client'),
-  metal: z.enum(['GOLD', 'SILVER']),
-  type: z.enum(['BUY', 'SELL']),
-  rows: z.array(rowSchema).min(1, 'Add at least one row'),
-  date: z.string().min(1),
-  time: z.string().min(1),
-  remarks: z.string().optional(),
-});
+const formSchema = z
+  .object({
+    clientId: z.string().min(1, 'Select a client'),
+    metal: z.enum(['GOLD', 'SILVER']),
+    type: z.enum(['BUY', 'SELL']),
+    entryMode: z.enum(['RATE', 'AMOUNT']),
+    rows: z.array(rowSchema).min(1, 'Add at least one row'),
+    date: z.string().min(1),
+    time: z.string().min(1),
+    remarks: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    data.rows.forEach((row, index) => {
+      if (data.entryMode === 'RATE') {
+        if (!row.rate || row.rate <= 0) {
+          ctx.addIssue({
+            path: ['rows', index, 'rate'],
+            code: z.ZodIssueCode.custom,
+            message: 'Rate must be greater than 0',
+          });
+        }
+      } else {
+        if (!row.amount || row.amount <= 0) {
+          ctx.addIssue({
+            path: ['rows', index, 'amount'],
+            code: z.ZodIssueCode.custom,
+            message: 'Amount must be greater than 0',
+          });
+        }
+      }
+    });
+  });
 
 type FormValues = z.infer<typeof formSchema>;
 
@@ -31,7 +55,11 @@ interface TransactionFormProps {
   defaultClientId?: string;
 }
 
-const blankRow = { quantity: undefined as unknown as number, rate: undefined as unknown as number };
+const blankRow = {
+  quantity: undefined as unknown as number,
+  rate: undefined as unknown as number,
+  amount: undefined as unknown as number,
+};
 
 export function TransactionForm({ transaction, onDone, defaultClientId }: TransactionFormProps): JSX.Element {
   const { data: clients } = useClientsQuery();
@@ -55,11 +83,13 @@ export function TransactionForm({ transaction, onDone, defaultClientId }: Transa
       clientId: transaction?.clientId ?? defaultClientId ?? '',
       metal: transaction?.metal ?? 'SILVER',
       type: transaction?.type ?? 'BUY',
+      entryMode: 'RATE',
       rows: transaction
         ? [
             {
               quantity: toDisplayQuantity(transaction.metal, transaction.quantity),
               rate: toDisplayRate(transaction.metal, transaction.rate),
+              amount: undefined as unknown as number,
             },
           ]
         : [blankRow],
@@ -77,10 +107,12 @@ export function TransactionForm({ transaction, onDone, defaultClientId }: Transa
         clientId: transaction.clientId,
         metal: transaction.metal,
         type: transaction.type,
+        entryMode: 'RATE',
         rows: [
           {
             quantity: toDisplayQuantity(transaction.metal, transaction.quantity),
             rate: toDisplayRate(transaction.metal, transaction.rate),
+            amount: undefined as unknown as number,
           },
         ],
         date: transaction.date,
@@ -97,15 +129,27 @@ export function TransactionForm({ transaction, onDone, defaultClientId }: Transa
   }, [clients, isEditing, defaultClientId, setValue, getValues]);
 
   const metal = watch('metal');
+  const entryMode = watch('entryMode');
   const rows = useWatch({ control, name: 'rows' });
   const computedAmount = useMemo(() => {
     return (rows ?? []).reduce((sum, row) => {
       const q = Number(row?.quantity);
+      if (!q || Number.isNaN(q)) return sum;
+      if (entryMode === 'AMOUNT') {
+        const a = Number(row?.amount);
+        if (!a || Number.isNaN(a)) return sum;
+        return sum + a;
+      }
       const r = Number(row?.rate);
-      if (!q || !r || Number.isNaN(q) || Number.isNaN(r)) return sum;
+      if (!r || Number.isNaN(r)) return sum;
       return sum + q * r;
     }, 0);
-  }, [rows]);
+  }, [rows, entryMode]);
+
+  // Amount is unit-invariant (kg/gram factors cancel), so the display-unit rate
+  // derived here converts to storage units the same way as a directly-entered rate.
+  const displayRateOf = (row: { quantity: number; rate?: number; amount?: number }, mode: FormValues['entryMode']) =>
+    mode === 'AMOUNT' ? row.amount! / row.quantity : row.rate!;
 
   const onSubmit = handleSubmit((values) => {
     if (isEditing && transaction) {
@@ -115,7 +159,7 @@ export function TransactionForm({ transaction, onDone, defaultClientId }: Transa
         metal: values.metal,
         type: values.type,
         quantity: toStorageQuantity(values.metal, row.quantity),
-        rate: toStorageRate(values.metal, row.rate),
+        rate: toStorageRate(values.metal, displayRateOf(row, values.entryMode)),
         date: values.date,
         time: values.time,
         remarks: values.remarks,
@@ -134,7 +178,7 @@ export function TransactionForm({ transaction, onDone, defaultClientId }: Transa
     };
     const storageRows = values.rows.map((row) => ({
       quantity: toStorageQuantity(values.metal, row.quantity),
-      rate: toStorageRate(values.metal, row.rate),
+      rate: toStorageRate(values.metal, displayRateOf(row, values.entryMode)),
     }));
 
     if (storageRows.length === 1) {
@@ -176,6 +220,7 @@ export function TransactionForm({ transaction, onDone, defaultClientId }: Transa
                       fields.forEach((_, index) => {
                         setValue(`rows.${index}.quantity`, undefined as unknown as number);
                         setValue(`rows.${index}.rate`, undefined as unknown as number);
+                        setValue(`rows.${index}.amount`, undefined as unknown as number);
                       });
                     }}
                     className={`rounded-xl py-2.5 text-sm font-semibold border transition ${
@@ -220,6 +265,38 @@ export function TransactionForm({ transaction, onDone, defaultClientId }: Transa
         </div>
       </div>
 
+      <div>
+        <label className="label">Enter By</label>
+        <Controller
+          control={control}
+          name="entryMode"
+          render={({ field }) => (
+            <div className="grid grid-cols-2 gap-2">
+              {(['RATE', 'AMOUNT'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => {
+                    field.onChange(m);
+                    fields.forEach((_, index) => {
+                      setValue(`rows.${index}.rate`, undefined as unknown as number);
+                      setValue(`rows.${index}.amount`, undefined as unknown as number);
+                    });
+                  }}
+                  className={`rounded-xl py-2.5 text-sm font-semibold border transition ${
+                    field.value === m
+                      ? 'bg-gold-500 border-gold-500 text-white'
+                      : 'border-gray-200 dark:border-gray-700 text-gray-500'
+                  }`}
+                >
+                  {m === 'RATE' ? 'Rate' : 'Total Amount'}
+                </button>
+              ))}
+            </div>
+          )}
+        />
+      </div>
+
       <div className="flex flex-col gap-3">
         {fields.map((field, index) => (
           <div key={field.id} className="flex items-start gap-2">
@@ -237,19 +314,35 @@ export function TransactionForm({ transaction, onDone, defaultClientId }: Transa
                   <p className="text-xs text-loss mt-1">{errors.rows[index]?.quantity?.message}</p>
                 )}
               </div>
-              <div>
-                {index === 0 && <label className="label">Rate (per {metal === 'SILVER' ? 'kg' : 'gram'})</label>}
-                <input
-                  type="number"
-                  step="0.01"
-                  className="input"
-                  placeholder={metal === 'SILVER' ? 'e.g. 92000' : 'e.g. 9600'}
-                  {...register(`rows.${index}.rate` as const)}
-                />
-                {errors.rows?.[index]?.rate && (
-                  <p className="text-xs text-loss mt-1">{errors.rows[index]?.rate?.message}</p>
-                )}
-              </div>
+              {entryMode === 'AMOUNT' ? (
+                <div>
+                  {index === 0 && <label className="label">Total Amount</label>}
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input"
+                    placeholder="e.g. 460000"
+                    {...register(`rows.${index}.amount` as const)}
+                  />
+                  {errors.rows?.[index]?.amount && (
+                    <p className="text-xs text-loss mt-1">{errors.rows[index]?.amount?.message}</p>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  {index === 0 && <label className="label">Rate (per {metal === 'SILVER' ? 'kg' : 'gram'})</label>}
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input"
+                    placeholder={metal === 'SILVER' ? 'e.g. 92000' : 'e.g. 9600'}
+                    {...register(`rows.${index}.rate` as const)}
+                  />
+                  {errors.rows?.[index]?.rate && (
+                    <p className="text-xs text-loss mt-1">{errors.rows[index]?.rate?.message}</p>
+                  )}
+                </div>
+              )}
             </div>
             {!isEditing && (
               <button
@@ -279,7 +372,9 @@ export function TransactionForm({ transaction, onDone, defaultClientId }: Transa
       </div>
 
       <div className="rounded-xl bg-gray-50 dark:bg-gray-800/60 px-4 py-3 flex items-center justify-between">
-        <span className="text-sm text-gray-500">Auto-calculated Amount</span>
+        <span className="text-sm text-gray-500">
+          {entryMode === 'AMOUNT' ? 'Total Amount' : 'Auto-calculated Amount'}
+        </span>
         <span className="text-lg font-bold text-gold-600 dark:text-gold-400">
           {formatCurrencyPrecise(computedAmount)}
         </span>

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, HandCoins, Pencil, Phone, MapPin } from 'lucide-react';
+import { ArrowLeft, Pencil, Phone, MapPin } from 'lucide-react';
 import { useClientLedgerQuery } from '@/hooks/useClients';
 import { useClientReportQuery } from '@/hooks/useReports';
 import { Modal } from '@/components/ui/Modal';
@@ -9,7 +9,8 @@ import { ClientForm } from '@/components/clients/ClientForm';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { StatCard } from '@/components/ui/StatCard';
-import { formatCurrency, formatCurrencyPrecise, formatDate } from '@/utils/format';
+import { formatCurrency, formatCurrencyPrecise, formatDate, formatNumber } from '@/utils/format';
+import { toDisplayQuantity } from '@/utils/units';
 
 export default function ClientDetail(): JSX.Element {
   const { id } = useParams<{ id: string }>();
@@ -37,9 +38,9 @@ export default function ClientDetail(): JSX.Element {
         <button className="btn-secondary" onClick={() => setEditOpen(true)}>
           <Pencil size={14} /> Edit
         </button>
-        <button className="btn-primary" onClick={() => setSettlementOpen(true)}>
+        {/* <button className="btn-primary" onClick={() => setSettlementOpen(true)}>
           <HandCoins size={14} /> Settle
-        </button>
+        </button> */}
       </div>
 
       {(client.mobile || client.address || client.gst || client.notes) && (
@@ -72,6 +73,18 @@ export default function ClientDetail(): JSX.Element {
           label="Client Profit Contribution"
           value={formatCurrency(report?.profit ?? 0)}
           tone={(report?.profit ?? 0) >= 0 ? 'profit' : 'loss'}
+        />
+        <StatCard
+          label="Gold Quantity"
+          value={`Bought ${formatNumber(report?.goldBuyQuantity ?? 0, 3)} g`}
+          subtext={`Sold ${formatNumber(report?.goldSellQuantity ?? 0, 3)} g`}
+          tone="gold"
+        />
+        <StatCard
+          label="Silver Quantity"
+          value={`Bought ${formatNumber(toDisplayQuantity('SILVER', report?.silverBuyQuantity ?? 0), 3)} kg`}
+          subtext={`Sold ${formatNumber(toDisplayQuantity('SILVER', report?.silverSellQuantity ?? 0), 3)} kg`}
+          tone="silver"
         />
       </div>
 
